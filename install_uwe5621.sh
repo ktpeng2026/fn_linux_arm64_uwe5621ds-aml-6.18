@@ -226,6 +226,36 @@ EOF
 
 depmod -a "${KERNEL_RELEASE}"
 
+if command -v systemctl >/dev/null 2>&1; then
+  BTATTACH=$(command -v btattach || true)
+  RFKILL=$(command -v rfkill || true)
+  [[ -n ${BTATTACH} ]] || die "btattach is required for Bluetooth auto-start (install bluez)"
+  [[ -n ${RFKILL} ]] || die "rfkill is required for Bluetooth auto-start"
+
+  cat >/etc/systemd/system/uwe5621-bluetooth.service <<EOF
+[Unit]
+Description=UWE5621 Bluetooth HCI over SDIO
+After=systemd-modules-load.service dev-ttyBT0.device
+Requires=dev-ttyBT0.device
+Before=bluetooth.service
+
+[Service]
+Type=simple
+ExecStartPre=${RFKILL} unblock bluetooth
+ExecStart=${BTATTACH} -B /dev/ttyBT0 -P h4 -S 115200
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  systemctl daemon-reload
+  systemctl enable uwe5621-bluetooth.service
+  log "Bluetooth auto-start enabled (uwe5621-bluetooth.service)"
+else
+  log "systemd not found; start btattach manually after reboot"
+fi
+
 log "installation complete"
 log "DTB backup suffix: .bak.${BACKUP_TAG}"
 log "reboot the machine to activate the new DTB and modules"
