@@ -1,19 +1,16 @@
 # UWE5621 / fnOS ARM64 / Linux 6.18.18
 
-本目录包含 Amlogic SM1 板卡使用的 UWE5621 SDIO Wi-Fi、蓝牙驱动及部署文件。预编译的 DTB 和 KO **仅适用于相应的板卡和内核构建**；不要仅凭内核主版本相同就安装到其他机器。
+本目录包含 Amlogic SM1 板卡使用的 UWE5621 SDIO Wi-Fi、蓝牙驱动及部署文件。可重复安装的发布包归档于 `releases/<uname -r>/aarch64/`；当前已归档 `releases/6.18.18.c1151-trim/aarch64/`。预编译的 DTB 和 KO **仅适用于相应的板卡和内核构建**；不要仅凭内核主版本相同就安装到其他机器。
 
 ## 文件说明
 
 | 路径 | 用途 |
 | --- | --- |
-| `dtb/meson-sm1-a95xf3-air_spdif_uwe5621ds_gbit.dtb` | 板卡设备树，安装时替换实际启动使用的 DTB |
-| `ko/uwe5621_bsp_sdio.ko` | SDIO / WCN 基础驱动 |
-| `ko/sprdwl_ng.ko` | Wi-Fi 驱动 |
-| `ko/sprdbt_tty.ko` | 蓝牙 TTY 驱动，创建 `/dev/ttyBT0` |
-| `fw/wcnmodem.bin` | WCN 固件 |
-| `fw/wifi_56630001_3ant.ini` | Wi-Fi 配置 |
-| `install_uwe5621.sh` | 一次安装 DTB、KO、固件并配置开机加载 |
-| `install_uwe5621_btattach.sh` | **仅**安装并启动蓝牙 `btattach` 服务 |
+| `releases/<uname -r>/aarch64/` | 对应内核的 DTB、三个 KO、两个固件文件及两个安装脚本，文件直接放在此目录 |
+| `dtb/meson-sm1-a95xf3-air_spdif_uwe5621ds_gbit.dts` | 板卡设备树源文件；已编译 DTB 也保存在 `dtb/` |
+| `build.sh` | 编译 KO 并整理到对应发布目录，**不会在构建主机安装模块** |
+| `install_uwe5621.sh` | 一次安装 DTB、KO、固件并配置开机加载；发布目录内也有副本 |
+| `install_uwe5621_btattach.sh` | **仅**安装并启动蓝牙 `btattach` 服务；发布目录内也有副本 |
 
 ## 完整安装（目标 fnOS 机器）
 
@@ -22,10 +19,10 @@
 ```sh
 uname -r
 find /boot -type f -name '*a95xf3*dtb'
-modinfo -F vermagic ko/uwe5621_bsp_sdio.ko
+modinfo -F vermagic "releases/$(uname -r)/aarch64/uwe5621_bsp_sdio.ko"
 ```
 
-将整个目录复制到目标机后，在本目录执行（把 DTB 路径改成该机器**实际启动使用**的文件）：
+将对应 `releases/<uname -r>/aarch64/` 目录复制到目标机，在该发布目录运行（把 DTB 路径改成该机器**实际启动使用**的文件）：
 
 ```sh
 sudo apt-get update
@@ -36,7 +33,7 @@ sudo bash ./install_uwe5621.sh \
 sudo reboot
 ```
 
-脚本也可以不传 `--source-dir`，这时从仓库 `main` 分支的 GitHub raw 地址下载 `dtb/`、`ko/`、`fw/` 文件，需要 `curl` 或 `wget` 及网络连接。若 `/boot` 下有多个候选 DTB，必须明确指定 `--dtb-target`。**不要在没有确认启动路径的情况下猜测 DTB 目标。**
+脚本在发布目录内运行时可省略 `--source-dir`；在仓库根目录运行时也会优先使用本地匹配版本的发布目录。若没有本地文件，则从仓库 `main` 分支的 GitHub raw 地址下载 `releases/$(uname -r)/aarch64/` 的文件，需要 `curl` 或 `wget` 及网络连接。若 `/boot` 下有多个候选 DTB，必须明确指定 `--dtb-target`。**不要在没有确认启动路径的情况下猜测 DTB 目标。**
 
 脚本会安装模块到 `/lib/modules/$(uname -r)/extra/uwe5621/`，固件到 `/lib/firmware/uwe5621/wcnmodem.bin`，配置到 `/lib/firmware/wifi_56630001_3ant.ini`，并设置模块开机加载、禁用 NetworkManager 的 Wi-Fi 省电及启用蓝牙 `uwe5621-bluetooth.service`。已有的 DTB、KO 和固件会生成带时间戳的 `.bak.*` 备份。完整安装脚本**不会自动安装** `bluez`/`rfkill`，请先执行上面的 apt 命令。
 
@@ -114,11 +111,11 @@ sudo apt-get install "linux-headers-$(uname -r)"
 ```sh
 KDIR=/lib/modules/"$(uname -r)"/build
 test -f "$KDIR/Makefile" && test -f "$KDIR/.config" && test -f "$KDIR/Module.symvers"
-make KDIR="$KDIR" ARCH=arm64 -j"$(nproc)"
+KDIR="$KDIR" bash ./build.sh
 modinfo -F vermagic unisocwcn/uwe5621_bsp_sdio.ko
 ```
 
-如果构建目录不是 `/lib/modules/$(uname -r)/build`，将 `KDIR` 改为对应的内核构建目录。`build.sh` 还会安装并尝试加载模块，**不是纯编译脚本**；只想生成 KO 时使用上面的 `make` 命令。
+如果构建目录不是 `/lib/modules/$(uname -r)/build`，将 `KDIR` 改为对应的内核构建目录。`build.sh` 仅编译并归档，不安装/加载模块；运行前需在对应发布目录中准备 `wcnmodem.bin` 和 `wifi_56630001_3ant.ini`。
 
 ### x86_64 主机交叉编译 ARM64
 
@@ -137,8 +134,8 @@ sudo apt-get install -y build-essential make gcc binutils kmod \
 KDIR=/path/to/target-arm64-kernel-build
 test -f "$KDIR/Makefile" && test -f "$KDIR/.config" && test -f "$KDIR/Module.symvers"
 command -v aarch64-linux-gnu-gcc
-make KDIR="$KDIR" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j"$(nproc)"
+KDIR="$KDIR" CROSS_COMPILE=aarch64-linux-gnu- bash ./build.sh
 modinfo -F vermagic unisocwcn/uwe5621_bsp_sdio.ko
 ```
 
-产物为 `unisocwcn/uwe5621_bsp_sdio.ko`、`unisocwifi/sprdwl_ng.ko` 和 `tty-sdio/sprdbt_tty.ko`。交叉编译**不要运行** `build.sh`：它使用主机的 `uname -r`、`sudo`、`depmod`、`modprobe`，可能操作 x86_64 主机。将 KO 复制到目标机后再安装并运行 `depmod -a`；DTB、固件安装参见上面的完整安装流程。核对每个 KO 的 `vermagic`、目标架构和目标内核后再加载。
+`build.sh` 根据目标内核构建目录的 `kernelrelease` 生成 `releases/<kernelrelease>/aarch64/`，拷贝编译好的三个 KO、板卡 DTB 及两个安装脚本；固件需预先放入同一发布目录，脚本不会凭空生成或跨版本复制固件。构建后可把整个目录存档或复制到目标机，直接运行其中的 `install_uwe5621.sh`，无需再次编译。核对每个 KO 的 `vermagic`、目标架构和目标内核后再加载。

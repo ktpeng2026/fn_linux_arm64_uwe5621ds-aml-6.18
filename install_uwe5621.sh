@@ -5,6 +5,9 @@ PROGRAM_NAME=${0##*/}
 KERNEL_RELEASE=$(uname -r)
 BASE_URL=${UWE5621_BASE_URL:-https://raw.githubusercontent.com/ktpeng2026/uwe5621ds-aml-6.18/main}
 SOURCE_DIR=${UWE5621_SOURCE_DIR:-}
+ARCHITECTURE=aarch64
+RELEASE_PATH=releases/${KERNEL_RELEASE}/${ARCHITECTURE}
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 DTB_TARGET=${UWE5621_DTB_TARGET:-}
 DTB_NAME=meson-sm1-a95xf3-air_spdif_uwe5621ds_gbit.dtb
 ORIGINAL_DTB_NAME=meson-sm1-a95xf3-air-gbit.dtb
@@ -30,21 +33,16 @@ Usage:
 
 Options:
   --url URL            Repository raw URL. Defaults to the ktpeng2026 GitHub repo.
-  --source-dir DIR     Repository checkout containing dtb/, ko/ and fw/.
+  --source-dir DIR     Repository checkout or releases/<kernel>/aarch64 directory.
   --dtb-target PATH    Existing boot DTB path to replace. Auto-detected when omitted.
   --install-mac-file   Install unisoc_wifi_mac.txt if it exists in the source.
   -h, --help           Show this help.
 
 Required source files:
-  dtb/${DTB_NAME}
-  ko/uwe5621_bsp_sdio.ko
-  ko/sprdwl_ng.ko
-  ko/sprdbt_tty.ko
-  fw/wcnmodem.bin
-  fw/wifi_56630001_3ant.ini
+  ${RELEASE_PATH}/{${DTB_NAME},uwe5621_bsp_sdio.ko,sprdwl_ng.ko,sprdbt_tty.ko,wcnmodem.bin,wifi_56630001_3ant.ini}
 
 Optional source file:
-  fw/unisoc_wifi_mac.txt
+  ${RELEASE_PATH}/unisoc_wifi_mac.txt
 
 Default installation:
   sudo ./${PROGRAM_NAME} --dtb-target /boot/dtb/amlogic/${ORIGINAL_DTB_NAME}
@@ -99,6 +97,17 @@ while (($#)); do
 done
 
 [[ ${EUID} -eq 0 ]] || die "run this script as root"
+[[ $(uname -m) == ${ARCHITECTURE} ]] || die "this release requires ${ARCHITECTURE}, got $(uname -m)"
+
+if [[ -z ${SOURCE_DIR} ]]; then
+  if [[ -f ${SCRIPT_DIR}/${RELEASE_PATH}/${DTB_NAME} ]]; then
+    SOURCE_DIR=${SCRIPT_DIR}/${RELEASE_PATH}
+  elif [[ -f ${SCRIPT_DIR}/${DTB_NAME} ]]; then
+    SOURCE_DIR=${SCRIPT_DIR}
+  fi
+elif [[ -d ${SOURCE_DIR}/${RELEASE_PATH} ]]; then
+  SOURCE_DIR=${SOURCE_DIR}/${RELEASE_PATH}
+fi
 
 WORK_DIR=$(mktemp -d /tmp/uwe5621-install.XXXXXX)
 
@@ -119,14 +128,14 @@ fetch_file() {
 
   if command -v curl >/dev/null 2>&1; then
     if ! curl --fail --location --silent --show-error \
-      "${BASE_URL}/${remote_path}" -o "${destination}"; then
+      "${BASE_URL}/${RELEASE_PATH}/${remote_path}" -o "${destination}"; then
       [[ ${required} -eq 0 ]] && return 1
-      die "failed to download ${BASE_URL}/${remote_path}"
+      die "failed to download ${BASE_URL}/${RELEASE_PATH}/${remote_path}"
     fi
   elif command -v wget >/dev/null 2>&1; then
-    if ! wget -q "${BASE_URL}/${remote_path}" -O "${destination}"; then
+    if ! wget -q "${BASE_URL}/${RELEASE_PATH}/${remote_path}" -O "${destination}"; then
       [[ ${required} -eq 0 ]] && return 1
-      die "failed to download ${BASE_URL}/${remote_path}"
+      die "failed to download ${BASE_URL}/${RELEASE_PATH}/${remote_path}"
     fi
   else
     die "curl or wget is required"
@@ -171,14 +180,14 @@ detect_dtb_target() {
 log "kernel: ${KERNEL_RELEASE}"
 log "collecting installation files"
 
-fetch_file "dtb/${DTB_NAME}" "${DTB_NAME}"
+fetch_file "${DTB_NAME}" "${DTB_NAME}"
 for module in "${MODULES[@]}"; do
-  fetch_file "ko/${module}" "${module}"
+  fetch_file "${module}" "${module}"
 done
-fetch_file fw/wcnmodem.bin wcnmodem.bin
-fetch_file fw/wifi_56630001_3ant.ini wifi_56630001_3ant.ini
+fetch_file wcnmodem.bin wcnmodem.bin
+fetch_file wifi_56630001_3ant.ini wifi_56630001_3ant.ini
 if [[ ${INSTALL_MAC_FILE} -eq 1 ]]; then
-  fetch_file fw/unisoc_wifi_mac.txt unisoc_wifi_mac.txt 0 || \
+  fetch_file unisoc_wifi_mac.txt unisoc_wifi_mac.txt 0 || \
     die "--install-mac-file requested but unisoc_wifi_mac.txt is unavailable"
 fi
 
